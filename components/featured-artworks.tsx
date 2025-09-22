@@ -4,66 +4,131 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Heart, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 
-const featuredArtworks = [
-  {
-    id: 1,
-    title: "Radha Krishna in Garden",
-    artist: "Unknown Mughal Artist",
-    period: "17th Century",
-    category: "Mughal Painting",
-    description:
-      "A sublime depiction of divine love between Radha and Krishna set in a lush garden, showcasing the finest Mughal miniature painting techniques.",
-    image: "/mughal-miniature-painting-of-radha-krishna-in-gard.jpg",
-    likes: 234,
-  },
-  {
-    id: 2,
-    title: "Nataraja Bronze Sculpture",
-    artist: "Chola Dynasty Artisan",
-    period: "11th Century",
-    category: "Temple Sculpture",
-    description:
-      "The cosmic dance of Lord Shiva as Nataraja, representing the eternal cycle of creation and destruction in this masterpiece of Chola bronze work.",
-    image: "/ancient-indian-bronze-nataraja-sculpture-dancing-p.jpg",
-    likes: 189,
-  },
-  {
-    id: 3,
-    title: "Warli Folk Art",
-    artist: "Tribal Artists of Maharashtra",
-    period: "Traditional Contemporary",
-    category: "Folk Art",
-    description:
-      "Traditional Warli paintings depicting daily life, harvest festivals, and nature worship using simple geometric patterns and natural pigments.",
-    image: "/traditional-indian-warli-folk-art-with-geometric-p.jpg",
-    likes: 156,
-  },
-]
+interface Artwork {
+  id: string
+  title: string
+  artist: string
+  period: string
+  category: string
+  description: string
+  image_url: string
+  year_created?: string
+  medium?: string
+  dimensions?: string
+  location?: string
+  cultural_significance?: string
+}
 
 export function FeaturedArtworks() {
-  const [likedArtworks, setLikedArtworks] = useState<Set<number>>(new Set())
-  const [artworkLikes, setArtworkLikes] = useState<Record<number, number>>(
-    featuredArtworks.reduce((acc, artwork) => ({ ...acc, [artwork.id]: artwork.likes }), {}),
-  )
+  const [artworks, setArtworks] = useState<Artwork[]>([])
+  const [likedArtworks, setLikedArtworks] = useState<Set<string>>(new Set())
+  const [artworkLikes, setArtworkLikes] = useState<Record<string, number>>({})
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-  const handleLike = (artworkId: number) => {
+  const supabase = createClient()
+
+  useEffect(() => {
+    fetchArtworks()
+    checkUser()
+  }, [])
+
+  const checkUser = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    setUser(user)
+    if (user) {
+      fetchUserLikes(user.id)
+    }
+  }
+
+  const fetchArtworks = async () => {
+    try {
+      const { data, error } = await supabase.from("artworks").select("*").limit(6)
+
+      if (error) {
+        console.error("Error fetching artworks:", error)
+        return
+      }
+
+      setArtworks(data || [])
+
+      // Initialize like counts (in a real app, you'd get this from a view or separate query)
+      const likeCounts: Record<string, number> = {}
+      for (const artwork of data || []) {
+        const { count } = await supabase
+          .from("artwork_likes")
+          .select("*", { count: "exact", head: true })
+          .eq("artwork_id", artwork.id)
+
+        likeCounts[artwork.id] = count || 0
+      }
+      setArtworkLikes(likeCounts)
+    } catch (error) {
+      console.error("Error:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchUserLikes = async (userId: string) => {
+    try {
+      const { data, error } = await supabase.from("artwork_likes").select("artwork_id").eq("user_id", userId)
+
+      if (error) {
+        console.error("Error fetching user likes:", error)
+        return
+      }
+
+      const likedIds = new Set(data?.map((like) => like.artwork_id) || [])
+      setLikedArtworks(likedIds)
+    } catch (error) {
+      console.error("Error:", error)
+    }
+  }
+
+  const handleLike = async (artworkId: string) => {
+    if (!user) {
+      alert("Please sign in to like artworks")
+      return
+    }
+
     const isLiked = likedArtworks.has(artworkId)
     const newLikedArtworks = new Set(likedArtworks)
 
-    if (isLiked) {
-      newLikedArtworks.delete(artworkId)
-      setArtworkLikes((prev) => ({ ...prev, [artworkId]: prev[artworkId] - 1 }))
-    } else {
-      newLikedArtworks.add(artworkId)
-      setArtworkLikes((prev) => ({ ...prev, [artworkId]: prev[artworkId] + 1 }))
-    }
+    try {
+      if (isLiked) {
+        const { error } = await supabase
+          .from("artwork_likes")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("artwork_id", artworkId)
 
-    setLikedArtworks(newLikedArtworks)
+        if (error) throw error
+
+        newLikedArtworks.delete(artworkId)
+        setArtworkLikes((prev) => ({ ...prev, [artworkId]: prev[artworkId] - 1 }))
+      } else {
+        const { error } = await supabase.from("artwork_likes").insert({ user_id: user.id, artwork_id: artworkId })
+
+        if (error) throw error
+
+        newLikedArtworks.add(artworkId)
+        setArtworkLikes((prev) => ({ ...prev, [artworkId]: prev[artworkId] + 1 }))
+      }
+
+      setLikedArtworks(newLikedArtworks)
+    } catch (error) {
+      console.error("Error updating like:", error)
+      alert("Error updating like. Please try again.")
+    }
   }
 
-  const handleShare = async (artwork: (typeof featuredArtworks)[0]) => {
+  const handleShare = async (artwork: Artwork) => {
     if (navigator.share) {
       try {
         await navigator.share({
@@ -81,9 +146,36 @@ export function FeaturedArtworks() {
     }
   }
 
-  const handleViewDetails = (artwork: (typeof featuredArtworks)[0]) => {
-    alert(
-      `Viewing details for: ${artwork.title}\n\nArtist: ${artwork.artist}\nPeriod: ${artwork.period}\nCategory: ${artwork.category}\n\n${artwork.description}`,
+  const handleViewDetails = (artwork: Artwork) => {
+    const details = [
+      `Title: ${artwork.title}`,
+      `Artist: ${artwork.artist}`,
+      `Period: ${artwork.period}`,
+      `Category: ${artwork.category}`,
+      artwork.year_created && `Year: ${artwork.year_created}`,
+      artwork.medium && `Medium: ${artwork.medium}`,
+      artwork.dimensions && `Dimensions: ${artwork.dimensions}`,
+      artwork.location && `Location: ${artwork.location}`,
+      "",
+      artwork.description,
+      "",
+      artwork.cultural_significance && `Cultural Significance: ${artwork.cultural_significance}`,
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    alert(details)
+  }
+
+  if (loading) {
+    return (
+      <section id="gallery" className="py-20 bg-muted/30">
+        <div className="container mx-auto px-4">
+          <div className="text-center">
+            <p>Loading artworks...</p>
+          </div>
+        </div>
+      </section>
     )
   }
 
@@ -99,14 +191,14 @@ export function FeaturedArtworks() {
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {featuredArtworks.map((artwork) => (
+          {artworks.map((artwork) => (
             <Card
               key={artwork.id}
               className="group overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1"
             >
               <div className="aspect-[3/4] overflow-hidden">
                 <img
-                  src={artwork.image || "/placeholder.svg"}
+                  src={artwork.image_url || "/placeholder.svg"}
                   alt={artwork.title}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 />
@@ -131,7 +223,7 @@ export function FeaturedArtworks() {
                       <Heart
                         className={`h-4 w-4 mr-1 ${likedArtworks.has(artwork.id) ? "fill-red-500 text-red-500" : ""}`}
                       />
-                      {artworkLikes[artwork.id]}
+                      {artworkLikes[artwork.id] || 0}
                     </Button>
                     <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleShare(artwork)}>
                       <Share2 className="h-4 w-4" />

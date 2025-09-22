@@ -1,7 +1,22 @@
+"use client"
+
 import { Button } from "@/components/ui/button"
 import { ArrowRight } from "lucide-react"
 
 export function Hero() {
+  const handleExploreGallery = () => {
+    const gallerySection = document.getElementById("gallery")
+    if (gallerySection) {
+      gallerySection.scrollIntoView({ behavior: "smooth" })
+    }
+  }
+
+  const handleVirtualTour = () => {
+    alert(
+      "Virtual Tour feature coming soon! This will provide an immersive 3D experience of Indian art galleries and museums.",
+    )
+  }
+
   return (
     <section id="home" className="relative py-20 lg:py-32">
       <div className="container mx-auto px-4">
@@ -19,11 +34,11 @@ export function Hero() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" className="group">
+              <Button size="lg" className="group" onClick={handleExploreGallery}>
                 Explore Gallery
                 <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Button>
-              <Button variant="outline" size="lg">
+              <Button variant="outline" size="lg" onClick={handleVirtualTour}>
                 Virtual Tour
               </Button>
             </div>
